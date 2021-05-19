@@ -3,7 +3,7 @@ import requests
 import json
 import os
 
-path_collect_data = 'C:\\Users\\86135\\Desktop\\python\\B站个人资料\\收藏夹\\collect-data'  # 存放收藏夹数据的目录
+path_collect_data = ''  # 存放收藏夹数据的目录，自己输入
 
 def crawling():
     # 请求头
@@ -12,7 +12,7 @@ def crawling():
     }
 
     # 第一次爬取: 获取所有收藏夹的id
-    url = 'https://api.bilibili.com/x/v3/fav/folder/created/list-all?up_mid=289920431&jsonp=jsonp'  # up_mid修改成自己的UID
+    url = 'https://api.bilibili.com/x/v3/fav/folder/created/list-all?up_mid=XXXXXXXXXX&jsonp=jsonp'  # XXXXXXXXXX修改成自己的UID
     response = requests.get(url, headers)
     assign = response.json()
     with open('收藏夹id.json', 'w', encoding='utf-8')as fp:
