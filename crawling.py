@@ -12,7 +12,7 @@ def crawling(path_collect_data):
     # 第一次爬取: 获取所有收藏夹的id
     url = 'https://api.bilibili.com/x/v3/fav/folder/created/list-all'
     params = {
-        'up_mid': 289920431,  # 自己账号的UID
+        'up_mid': ,  # 写入自己账号的UID
         'jsonp': 'jsonp',
     }
     response = requests.get(url=url, params=params, headers=headers)
