@@ -3,9 +3,9 @@
 	
 <h2>源文件下载下来有两点需要注意</h2>
 
-1.在main.py中输入文件保存的目录
+1.入口为main.py
 
-2.在crawling.py中的url中输入自己的B站 UID
+2.使用方法：python3 main.py [uid 必填] [output_path 可选]
 
 <h3>实现思路</h3>
 
