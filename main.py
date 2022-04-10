@@ -5,14 +5,13 @@ import requests
 from concurrent import futures
 
 
-# 处理原始数据，获取up头像和视频封面
+# 处理原始数据,去掉一些无用信息，让数据更整齐
 def ProcessRawData(RawData):
     NewData = {}
     for i in RawData.values():
         media = {
             "id": i['id'],
             "BV": i['bv_id'],
-            "是否失效": False,
             "up主": {
                 "ID": i['upper']['mid'],
                 "昵称": i['upper']['name'],
@@ -39,20 +38,29 @@ def ProcessRawData(RawData):
     return NewData
 
 
-# 与上一次爬取对比，目前是标记上次没失效，但是这次失效的视频
+# 与上一次爬取对比，对于被删除的和自己取消收藏的视频,予以不同的标记
 def CompareLastTime(ReadPath, NewData):
     with open(ReadPath, 'r', encoding='utf-8') as f:
         OldData = json.load(f)
+    # 视频被删除，则保留上次的数据，并且标记
     for i in list(NewData.values()):
         if i['视频信息']['标题'] == "已失效视频" and str(i['id']) in OldData.keys():
-            print('失效了')
+            print(OldData[str(i['id'])]['视频信息']['标题'] + '失效了')
             OldData[str(i['id'])]['是否失效'] = True
             NewData[str(i['id'])] = OldData[str(i['id'])]
+
+    # 自己取消收藏，标记
+    for i in list(OldData.values()):
+        if i['id'] not in NewData.keys():
+            print(i['视频信息']['标题'] + '取消了收藏')
+            OldData[str(i['id'])]['是否取消了收藏'] = True
+            NewData[str(i['id'])] = OldData[str(i['id'])]
+
     return NewData
 
 
 # 爬取收藏夹的ID
-def GetFavoriteID(WritePath):
+def GetFavoriteID(WritePath, UID):
     # 请求头
     headers = {
         'authority': 'api.bilibili.com',
@@ -75,7 +83,7 @@ def GetFavoriteID(WritePath):
     }
     url = 'https://api.bilibili.com/x/v3/fav/folder/created/list-all'
     params = {
-        'up_mid': 289920431,  # 自己账号的UID
+        'up_mid': UID,  # 自己账号的UID
         'jsonp': 'jsonp',
     }
     response = requests.get(url=url, params=params, headers=headers)
@@ -145,11 +153,12 @@ def GetALLFavorite(WritePath):
     for i in ID_list:
         print('爬取中...当前正在爬取' + i['title'])
         filename = WritePath + i['title'] + '.json'
+
+        # 获得一个收藏夹信息，经过处理后一个json文件中
         data = GetOneFavorite(i['id'], int(i['media_count'] / 20 + 1) + 1)
-        # 再次处理数据，并且写入json文件
-        finally_data = CompareLastTime(filename, ProcessRawData(data))
+        a_fav_data = CompareLastTime(filename, ProcessRawData(data))
         with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(finally_data, f, ensure_ascii=False)
+            json.dump(a_fav_data, f, ensure_ascii=False)
     print('所有收藏夹爬取完毕！！！')
 
 
@@ -165,7 +174,7 @@ def GetPhoto(ReadPath):
         # 因为时间较长，想要显示当前进度，所以先获取全部要爬取的图片信息,顺便给up主去重
         for j in data.values():
             # 如果视频已经失效了，就不操作
-            if j['是否失效']:
+            if '是否失效' in j.keys():
                 continue
             Video_dict[j['id']] = j['视频信息']['封面']
             UP_dict[j['up主']['ID']] = j['up主']['头像']
@@ -195,10 +204,15 @@ def CrawlPhoto(data_dict, WritePath):
 
 
 if __name__ == "__main__":
-    path = '收藏夹信息/'  # 存放信息的文件夹
-    GetFavoriteID(path)
-    GetALLFavorite(path)
+    # 这三个文件夹需要提前创建
+    path1 = '收藏夹信息/'  # 存放信息的文件夹
+    path2 = '视频封面/'  # 放视频封面的文件夹
+    path3 = 'up头像/'  # 放up主头像的文件夹
+
+    # 执行程序，计算执行时间、爬取收藏夹ID、爬取收藏夹信息、爬取视频封面和up头像
     STime = time.perf_counter()
-    GetPhoto(path)
+    GetFavoriteID(path1, 289920431)  # 自己账号的uid
+    GetALLFavorite(path1)
+    GetPhoto(path1)
     ETime = time.perf_counter()
     print(time.strftime("%M:%S", time.gmtime(ETime - STime)))
