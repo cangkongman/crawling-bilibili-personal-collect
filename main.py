@@ -1,8 +1,10 @@
 import json
 import os
 import time
-import requests
 from concurrent import futures
+from viewing import view
+import requests
+import math
 
 
 # 处理原始数据,去掉一些无用信息，让数据更整齐
@@ -12,6 +14,7 @@ def ProcessRawData(RawData):
         media = {
             "id": i['id'],
             "BV": i['bv_id'],
+            "是否失效": False,
             "up主": {
                 "ID": i['upper']['mid'],
                 "昵称": i['upper']['name'],
@@ -40,6 +43,8 @@ def ProcessRawData(RawData):
 
 # 与上一次爬取对比，对于被删除的和自己取消收藏的视频,予以不同的标记
 def CompareLastTime(ReadPath, NewData):
+    if not os.path.exists(ReadPath):
+        return NewData
     with open(ReadPath, 'r', encoding='utf-8') as f:
         OldData = json.load(f)
     # 视频被删除，则保留上次的数据，并且标记
@@ -155,64 +160,132 @@ def GetALLFavorite(WritePath):
         filename = WritePath + i['title'] + '.json'
 
         # 获得一个收藏夹信息，经过处理后一个json文件中
-        data = GetOneFavorite(i['id'], int(i['media_count'] / 20 + 1) + 1)
+        data = GetOneFavorite(i['id'], math.ceil(i['media_count'] / 20) + 1)
         a_fav_data = CompareLastTime(filename, ProcessRawData(data))
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(a_fav_data, f, ensure_ascii=False)
+
+    os.remove(WritePath + '收藏夹id.json')
     print('所有收藏夹爬取完毕！！！')
 
 
-# 爬取图片，包括视频封面和up主头像
-def GetPhoto(ReadPath):
+def SetPhotoURl(ReadPath):
     file_name_list = os.listdir(ReadPath)
-    file_name_list.remove('收藏夹id.json')
-    UP_dict = {}
-    Video_dict = {}
+    Cover_dict = {}
+    Face_dict = {}
     for i in file_name_list:
+        cover_url = {}  # 视频封面按收藏夹分类
         with open(ReadPath + i, 'r', encoding='utf-8') as f1:
             data = json.load(f1)
-        # 因为时间较长，想要显示当前进度，所以先获取全部要爬取的图片信息,顺便给up主去重
         for j in data.values():
-            # 如果视频已经失效了，就不操作
-            if '是否失效' in j.keys():
-                continue
-            Video_dict[j['id']] = j['视频信息']['封面']
-            UP_dict[j['up主']['ID']] = j['up主']['头像']
+            if j['是否失效']:
+                cover_url['已失效视频'] = j['视频信息']['封面']
+                print(j['视频信息']['标题'] + '已失效')
+            else:
+                cover_url[j['BV']] = j['视频信息']['封面']
+            Face_dict[j['up主']['ID']] = j['up主']['头像']
 
-    CrawlPhoto(Video_dict, '视频封面/')
-    CrawlPhoto(UP_dict, 'up头像/')
+        Cover_dict[i.split('.')[0]] = cover_url
+    with open('视频封面url.json', 'w', encoding='utf-8') as fp:
+        json.dump(Cover_dict, fp, ensure_ascii=False)
+    with open('up头像url.json', 'w', encoding='utf-8') as fp:
+        json.dump(Face_dict, fp, ensure_ascii=False)
 
 
-def CrawlPhoto(data_dict, WritePath):
-    ss = '视频'
-    if WritePath == 'up头像/':
-        ss = 'up'
-    keys = list(data_dict.keys())
-    for i in range(len(keys))[::15]:
-        executor = futures.ThreadPoolExecutor(max_workers=15)
+# 爬取视频封面
+def GetCover(PhotoURL_filename):
+    count, MaxCount = 0, 0
+    with open(PhotoURL_filename, 'r', encoding='utf-8') as fp:
+        PhotoURL_dict = json.load(fp)
+    for i in PhotoURL_dict.values():
+        MaxCount += len(i.values())
+
+    for fav_name in PhotoURL_dict.keys():
+        url_list = []  # 放多个url进行多线程
+        # 视频封面按收藏夹分类
+        Cover_Path = '视频封面/' + fav_name + '/'
+        if not os.path.exists(Cover_Path):
+            os.makedirs(Cover_Path)
+        url_list = []  # 放多个url进行多线程
+        fav_count = 0
+        for BV, url in PhotoURL_dict[fav_name].items():
+            count += 1
+            fav_count += 1
+            message = '[' + str(count) + '/' + str(MaxCount) + ']:视频封面' + BV + fav_name + '[' + str(
+                fav_count) + '/' + str(len(PhotoURL_dict[fav_name])) + ']'
+            print(message)
+            url_list.append(url)
+            fs = []
+            if len(url_list) == 5 or fav_count == len(PhotoURL_dict[fav_name]):
+                executor = futures.ThreadPoolExecutor(max_workers=5)
+                while len(url_list) != 0:
+                    f = executor.submit(requests.get, url_list.pop())
+                    # print(message)
+                    fs.append(f)
+                futures.wait(fs)
+                result = [f.result().content for f in fs]
+                print(fav_count)
+                for i in range(len(result)):
+                    with open(Cover_Path + list(PhotoURL_dict[fav_name].keys())[fav_count - 1 - i] + '.jpg',
+                              'wb') as fp:
+                        print(fav_count - 1 - i)
+                        fp.write(result[i])
+
+
+def GetFace(PhotoURL_filename):
+    with open(PhotoURL_filename, 'r', encoding='utf-8') as fp:
+        PhotoURL_dict = json.load(fp)
+    count, MaxCount = 0, len(PhotoURL_dict)
+
+    Face_Path = 'up头像/'
+    if not os.path.exists(Face_Path):
+        os.makedirs(Face_Path)
+
+    url_list = []  # 放多个url进行多线程
+    for ID, url in PhotoURL_dict.items():
+        count += 1
+        message = '[' + str(count) + '/' + str(MaxCount) + ']:up头像' + ID
+        print(message)
+        url_list.append(url)
         fs = []
-        for j in range(15):
-            if (i + j) < len(keys):
-                f = executor.submit(requests.get, data_dict[keys[i + j]])
-                print('[' + str(i + +j + 1) + '/' + str(len(keys)) + ']:' + ss + str(keys[i + j]))
+        if len(url_list) == 5 or count == MaxCount:
+            executor = futures.ThreadPoolExecutor(max_workers=5)
+            while len(url_list) != 0:
+                f = executor.submit(requests.get, url_list.pop())
+                # print(message)
                 fs.append(f)
-        futures.wait(fs)
-        result = [f.result().content for f in fs]
-        for c, k in zip(result, keys):
-            with open(WritePath + str(k) + '.jpg', 'wb') as fp:
-                fp.write(c)
+            futures.wait(fs)
+            result = [f.result().content for f in fs]
+            for i in range(len(result)):
+                with open(Face_Path + list(PhotoURL_dict.keys())[count - 1 - i] + '.jpg', 'wb') as fp:
+                    fp.write(result[i])
 
 
 if __name__ == "__main__":
-    # 这三个文件夹需要提前创建
     path1 = '收藏夹信息/'  # 存放信息的文件夹
     path2 = '视频封面/'  # 放视频封面的文件夹
     path3 = 'up头像/'  # 放up主头像的文件夹
 
-    # 执行程序，计算执行时间、爬取收藏夹ID、爬取收藏夹信息、爬取视频封面和up头像
+    if not os.path.exists(path1):
+        os.makedirs(path1)
+    if not os.path.exists(path2):
+        os.makedirs(path2)
+    if not os.path.exists(path3):
+        os.makedirs(path3)
+
+    time_list = []
     STime = time.perf_counter()
     GetFavoriteID(path1, 289920431)  # 自己账号的uid
     GetALLFavorite(path1)
-    GetPhoto(path1)
+    SetPhotoURl(path1)
+    GetCover('视频封面url.json')
+    GetFace('up头像url.json')
     ETime = time.perf_counter()
-    print(time.strftime("%M:%S", time.gmtime(ETime - STime)))
+    time_list.append(time.strftime("%M:%S", time.gmtime(ETime - STime)))
+
+    STime = time.perf_counter()
+    view(path1, './收藏夹信息.xlsx')
+    ETime = time.perf_counter()
+    time_list.append(time.strftime("%M:%S", time.gmtime(ETime - STime)))
+    print('执行爬取代码所用时间：' + time_list[0])  # 视收藏视频数量和网速而定，800视频大概五分钟
+    print('将数据写入excel文件所用时间' + time_list[1])  # 800视频大概两分半钟
